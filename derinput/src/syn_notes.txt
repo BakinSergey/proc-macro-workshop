@@ -1,0 +1,31 @@
+https://veykril.github.io/tlborm/proc-macros.html   - little book
+
+https://github.com/mathstuf/rust-darling            - darling
+https://docs.rs/darling/latest/darling/             - darling docs
+
+https://github.com/dtolnay/syn                      - syn
+https://docs.rs/syn/latest/syn/                     - syn docs
+
+https://docs.rs/derive-attribute/latest/derive_attribute/   - derive_attribute docs
+
+examples of proc_macros:
+========================
+https://github.com/therealhieu/rust-procedural-macro-example
+https://habr.com/ru/articles/486740/
+
+
+syn
+===
+навеска процедурного derive-макроса возможна на: структуру, перечисление
+
+#[proc_macro_derive(Foo, attributes(foo_helper))]
+
+
+pub struct DeriveInput {
+    pub attrs: Vec<Attribute>,
+    pub vis: Visibility,
+    pub ident: Ident,
+    pub generics: Generics,
+    pub data: Data,
+}
+
