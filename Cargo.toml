@@ -16,3 +16,7 @@ derive_builder = { path = "builder" }
 derive_debug = { path = "debug" }
 seq = { path = "seq" }
 sorted = { path = "sorted" }
+
+# утилиты для просмотра токенов / нод AST
+token_stream = { path = "token_stream" }
+derive_derinput = { path = "derinput" }

@@ -1,0 +1,11 @@
+[package]
+name = "derive_derinput"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = {version = "2.0.79", features = ["extra-traits"]}
+quote = { version = "1.0.37"}
