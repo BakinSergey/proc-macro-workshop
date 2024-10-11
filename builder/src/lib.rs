@@ -140,7 +140,7 @@ fn gen_impl_builder_code(fields_req: &HashMap<String, bool>, fields_tip: &HashMa
 pub fn derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 
-    // сбор хэшмапы опциональности полей
+    // данные Опциональности и Типов полей
     let (fields_kind, field_type) = get_fields_info(&input);
 
     // генерация билд-структуры по прототипу(теже поля и типы полей) вызывающей структуры
