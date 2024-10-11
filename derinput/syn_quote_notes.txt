@@ -1,0 +1,146 @@
+https://veykril.github.io/tlborm/proc-macros.html   - little book of Rust Macros
+
+https://github.com/mathstuf/rust-darling            - code
+https://docs.rs/darling/latest/darling/             - docs
+
+https://github.com/dtolnay/syn                      - code
+https://docs.rs/syn/latest/syn/                     - docs
+
+https://docs.rs/quote/latest/quote/                 - docs
+https://github.com/dtolnay/quote                    - code
+
+https://docs.rs/derive-attribute/latest/derive_attribute/   - derive_attribute docs
+
+examples of proc_macros:
+========================
+https://github.com/therealhieu/rust-procedural-macro-example
+https://habr.com/ru/articles/486740/
+https://rendered-obsolete.github.io/2018/12/03/rust_derive_macros.html
+https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=4c8c4fa178a67310bbb674892a8a0804
+https://users.rust-lang.org/t/proc-macro-cannot-use-item-as-ident-inside-quote-when-loop-through-vector-of-idents/85061/5
+
+
+quote
+=====
+
+macro_rules! quote {
+    ($($tt:tt)*) => { ... };
+}
+
+итерация и генерация кода:
+===================================
+
+let functions: Vec<_> = fields.iter().map(|field| {
+    quote!{
+        fn #field(&mut self) -> String {
+            // ...
+        }
+    }
+}).collect();
+
+let generated_code = quote! {
+      impl Struct {
+            #(#functions)*
+      }
+};
+
+===================================
+
+Variable interpolation is done with #var (similar to $var in macro_rules! macros).
+This grabs the var variable that is currently in scope and inserts it in that location in the output tokens.
+Any type implementing the ToTokens trait can be interpolated.
+This includes most Rust primitive types as well as most of the syntax tree types from the Syn crate.
+
+Repetition is done using #(...)* or #(...),* again similar to macro_rules!.
+This iterates through the elements of any variable interpolated within the repetition and inserts a copy of the repetition body for each one.
+The variables in an interpolation may be a Vec, slice, BTreeSet, or any Iterator.
+
+#(#var)* — no separators
+#(#var),* — the character before the asterisk is used as a separator
+#( struct #var; )* — the repetition can contain other tokens
+#( #k => println!("{}", #v), )* — even multiple interpolations
+
+
+
+
+
+syn
+===
+навеска процедурного derive-макроса возможна на:
+    структуру, перечисление, объединение - соответственно
+DeriveInput.data будет матчиться на
+    syn::Data::Struct, syn::Data::Enum, syn::Data::Union
+
+#[proc_macro_derive(Foo, attributes(foo_helper))]
+
+pub struct DeriveInput {
+    pub attrs: Vec<Attribute>,
+    pub vis: Visibility,
+    pub ident: Ident,
+    pub generics: Generics,
+    pub data: Data,
+}
+
+pub struct Attribute {
+    pub pound_token: Pound,
+    pub style: AttrStyle,
+    pub bracket_token: Bracket,
+    pub meta: Meta,
+}
+
+pub struct Pound {
+    pub spans: [Span; 1],
+}
+
+pub enum AttrStyle {
+    Outer,
+    Inner(Not),
+}
+
+pub enum Visibility {
+    Public(Pub),
+    Restricted(VisRestricted),
+    Inherited,
+}
+
+pub struct Ident { /* private fields */ }
+
+pub struct Generics {
+    pub lt_token: Option<Lt>,
+    pub params: Punctuated<GenericParam, Comma>,
+    pub gt_token: Option<Gt>,
+    pub where_clause: Option<WhereClause>,
+}
+
+==================================================
+
+pub enum Data {
+    Struct(DataStruct),
+    Enum(DataEnum),
+    Union(DataUnion),
+}
+
+pub struct DataStruct {
+    pub struct_token: Struct,
+    pub fields: Fields,
+    pub semi_token: Option<Semi>,
+}
+
+pub struct DataEnum {
+    pub enum_token: Enum,
+    pub brace_token: Brace,
+    pub variants: Punctuated<Variant, Comma>,
+}
+
+=================================================
+
+pub enum Fields {
+    Named(FieldsNamed),
+    Unnamed(FieldsUnnamed),
+    Unit,
+}
+
+pub struct FieldsNamed {
+    pub brace_token: Brace,
+    pub named: Punctuated<Field, Comma>,
+}

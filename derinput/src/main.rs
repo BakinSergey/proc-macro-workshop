@@ -1,11 +1,16 @@
-use derive_derinput::DerInput;
+// crate for sandbox experiments
 
-#[derive(DerInput)]
+use derive_builder::Builder;
+
+#[derive(Builder)]
 pub struct Command {
     executable: String,
-    // args: Vec<String>,
-    // env: Vec<String>,
-    current_dir: Option<String>,
+    args: Vec<String>,
+    env: Vec<String>,
+    current_dir: Option<String>
 }
 
-fn main() {}
+fn main() {
+    let command = Command::builder();
+
+}

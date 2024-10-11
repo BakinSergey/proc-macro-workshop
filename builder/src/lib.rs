@@ -1,13 +1,17 @@
-use syn::{
-    Fields,
-    Path, Type, TypePath};
+mod utils;
 
+use utils::extract_type_from_option;
+
+use syn::{Fields, Path, Type, TypePath};
 
 use proc_macro::TokenStream;
+use proc_macro2::TokenStream as TokenStream2;
+use quote::format_ident;
+use std::collections::HashMap;
 use syn::{parse_macro_input, Data, DeriveInput};
 
 
-fn get_optional_fields(input: &DeriveInput) -> Vec<String> {
+fn get_fields_info(input: &DeriveInput) -> (HashMap<String, bool>, HashMap<String, Type>) {
     let data = match &input.data {
         Data::Struct(x) => Some(x),
         _ => panic!("only non-empty struct type can be derived for"),
@@ -18,7 +22,8 @@ fn get_optional_fields(input: &DeriveInput) -> Vec<String> {
         _ => panic!("can't use Unnamed or Unit fields for struct."),
     };
 
-    let mut optional_fields = vec![];
+    let mut fields_kind = HashMap::new();
+    let mut fields_type = HashMap::new();
 
     for f in fields.unwrap().named.iter() {
         match &f.ty {
@@ -31,26 +36,118 @@ fn get_optional_fields(input: &DeriveInput) -> Vec<String> {
                         segments,
                     },
                 }
-            ) => if segments[0].ident.clone().to_string() == "Option" {
-                optional_fields.push(f.ident.clone().unwrap().to_string());
-            },
+            ) => {
+                // Обязательность поля
+                let is_mandatory = segments[0].ident.clone().to_string() != "Option";
+
+                // имя поля
+                let f_name = f.ident.clone().unwrap().to_string();
+
+                //тип поля
+                if is_mandatory {
+                    fields_type.insert(f_name.clone(), f.ty.clone());
+                } else {
+                    let t = extract_type_from_option(&f.ty).unwrap_or(&f.ty);
+                    fields_type.insert(f_name.clone(), t.clone());
+                }
+
+                fields_kind.insert(f_name, is_mandatory);
+            }
             _ => ()
         };
     };
-    optional_fields
+
+    (fields_kind, fields_type)
+}
+
+fn gen_builder_struct_code(derive_input: &DeriveInput) -> TokenStream2 {
+    let name = &derive_input.ident;
+
+    let fields = match &derive_input.data {
+        Data::Struct(ref s) => s.fields.iter().collect::<Vec<_>>(),
+        _ => panic!("can be derived only for structs"),
+    };
+
+    let struct_fields: Vec<_> = fields.iter().map(|field| {
+        quote::quote! {
+            #field
+        }
+    }).collect();
+
+    let name = format!("{}Builder", name);
+    let struct_name = format_ident!("{}", name);
+
+    let generated_code = quote::quote! {
+
+    #[derive(Debug, Default)]
+    struct #struct_name {
+            #(#struct_fields),*
+      }
+    };
+
+    generated_code
+}
+
+fn gen_impl_builder_code(fields_req: &HashMap<String, bool>, fields_tip: &HashMap<String, Type>) -> TokenStream2 {
+    let struct_fields_setters: Vec<_> = fields_req.iter().map(|(field_name, is_mandatory)| {
+        match is_mandatory {
+            true => {
+                let field_ident = format_ident!("{}", field_name);
+                let field_type = &fields_tip[field_name];
+
+                quote::quote! {
+                fn #field_ident(&mut self, val: #field_type) -> &mut Self {
+                    self.#field_ident = val;
+                    self
+                }
+            }
+            }
+            false => {
+                let field_ident = format_ident!("{}", field_name);
+                let field_type = &fields_tip[field_name];
+
+                quote::quote! {
+                fn #field_ident(&mut self, val: #field_type) -> &mut Self {
+                    self.#field_ident = Some(val);
+                    self
+                }
+            }
+            }
+        }
+    }).collect();
+
+    let generated_code = quote::quote! {
+
+        impl CommandBuilder {
+                #(#struct_fields_setters) *
+
+                fn build(&mut self) -> Result<Command, Box<dyn Error>> {
+                    Ok(
+                        Command {
+                            executable: self.executable.clone(),
+                            args: self.args.clone(),
+                            env: self.env.clone(),
+                            current_dir: self.current_dir.clone()
+                    })
+                }
+        };
+
+    };
+    generated_code
 }
 
 #[proc_macro_derive(Builder)]
 pub fn derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    // println!("{:?}", input);
 
-    let opt_fields = get_optional_fields(&input);
+    // сбор хэшмапы опциональности полей
+    let (fields_kind, field_type) = get_fields_info(&input);
 
-    let executable_is_req = !opt_fields.contains(&"executable".to_string());
-    let args_is_req = !opt_fields.contains(&"args".to_string());
-    let env_is_req = !opt_fields.contains(&"env".to_string());
-    let current_dir_is_req = !opt_fields.contains(&"current_dir".to_string());
+    // генерация билд-структуры по прототипу(теже поля и типы полей) вызывающей структуры
+    let builder_struct_code = gen_builder_struct_code(&input);
+
+    // Генерация кода функций-сеттеров в зависимости от опциональности полей
+    let impl_command_builder_code = gen_impl_builder_code(&fields_kind, &field_type);
 
     let expanded = quote::quote! {
 
@@ -58,21 +155,11 @@ pub fn derive(input: TokenStream) -> TokenStream {
         use std::error::Error;
         use std::fmt::{Display, Formatter, Result as FmtResult};
 
-        pub struct CommandBuilder {
-            executable: Option<String>,
-            args: Option<Vec<String>>,
-            env: Option<Vec<String>>,
-            current_dir: Option<String>,
-        }
+        #builder_struct_code
 
         impl Command {
             pub fn builder() -> CommandBuilder {
-                CommandBuilder {
-                    executable: None,
-                    args: None,
-                    env: None,
-                    current_dir: None,
-                }
+                CommandBuilder::default()
             }
         }
 
@@ -99,70 +186,10 @@ pub fn derive(input: TokenStream) -> TokenStream {
             }
         }
 
-        impl CommandBuilder {
-            fn executable(&mut self, executable: String) -> &mut Self {
-              self.executable = Some(executable);
-                self
-            }
+        #impl_command_builder_code
 
-            fn args(&mut self, args: Vec<String>) -> &mut Self {
-                self.args = Some(args);
-                self
-            }
-
-            fn env(&mut self, env: Vec<String>) -> &mut Self {
-                self.env = Some(env);
-                self
-            }
-
-            fn current_dir(&mut self, current_dir: String) -> &mut Self {
-                self.current_dir = Some(current_dir);
-                self
-            }
-
-            fn build(&mut self) -> Result<Command, Box<dyn Error>> {
-                if self.executable.is_none() && #executable_is_req {
-                    return Err(Box::new(BuilderError::from("executable is None".to_string())));
-                }
-
-                if self.args.is_none() && #args_is_req {
-                    return Err(Box::new(BuilderError::from("args is None".to_string())));
-                }
-
-                if self.env.is_none() && #env_is_req {
-                    return Err(Box::new(BuilderError::from("env is None".to_string())));
-                }
-
-                if self.current_dir.is_none() && #current_dir_is_req {
-                    return Err(Box::new(BuilderError::from("current_dir is None".to_string())));
-                }
-
-
-                // let executable = self.executable.clone();
-                // let args = self.args.clone();
-                // let env = self.env.clone();
-                let current_dir = self.current_dir.clone();
-
-                if #current_dir_is_req {
-                    let current_dir = self.current_dir.clone().unwrap(); };
-
-                // println!("Executable: {}", executable);
-                // println!("Args: {}", args);
-                // println!("Env: {}", env);
-                // println!("CurrentDir: {}", current_dir);
-
-                Ok(
-                    Command {
-                        executable: executable.clone().unwrap(),
-                        args: args.clone().unwrap(),
-                        env: env.clone().unwrap(),
-                        current_dir: current_dir
-                })
-            }
-        }
     };
 
     TokenStream::from(expanded)
-    // TokenStream::new()
 }
 
