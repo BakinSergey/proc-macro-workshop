@@ -8,79 +8,74 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::format_ident;
 use std::collections::HashMap;
+use syn::Ident;
 use syn::{parse_macro_input, Data, DeriveInput};
+use syn::FieldsNamed;
 
+struct FieldInfo {
+    is_mandatory: bool,
+    type_: Type,
+}
 
-fn get_fields_info(input: &DeriveInput) -> (HashMap<String, bool>, HashMap<String, Type>) {
-    let data = match &input.data {
-        Data::Struct(x) => Some(x),
-        _ => panic!("only non-empty struct type can be derived for"),
-    };
+fn extract_fields(input: &DeriveInput) -> &FieldsNamed {
+    match &input.data {
+        Data::Struct(ref s) => match &s.fields {
+            Fields::Named(ref fields) => fields,
+            _ => panic!("can be derived only for structs with named fields"),
+        },
+        _ => panic!("can be derived only for structs"),
+    }
+}
 
-    let fields = match &data.unwrap().fields {
-        Fields::Named(x) => Some(x),
-        _ => panic!("can't use Unnamed or Unit fields for struct."),
-    };
+fn get_fields_info(fields: &FieldsNamed) -> HashMap<Ident, FieldInfo> {
+    let mut infos = HashMap::new();
 
-    let mut fields_kind = HashMap::new();
-    let mut fields_type = HashMap::new();
-
-    for f in fields.unwrap().named.iter() {
-        match &f.ty {
+    for f in fields.named.iter() {
+        match f.ty {
             Type::Path(
                 TypePath {
                     qself: None,
                     path: Path {
                         leading_colon: None,
                         // Punctuated<PathSegment, Colon2>
-                        segments,
+                        ref segments,
                     },
                 }
             ) => {
                 // Обязательность поля
-                let is_mandatory = segments[0].ident.clone().to_string() != "Option";
+                let is_mandatory = segments[0].ident != "Option";
 
                 // имя поля
-                let f_name = f.ident.clone().unwrap().to_string();
+                let f_name = f.ident.clone().expect("Named field expected");
 
                 //тип поля
-                if is_mandatory {
-                    fields_type.insert(f_name.clone(), f.ty.clone());
+                let f_type = if is_mandatory {
+                    &f.ty
                 } else {
-                    let t = extract_type_from_option(&f.ty).unwrap_or(&f.ty);
-                    fields_type.insert(f_name.clone(), t.clone());
-                }
-
-                fields_kind.insert(f_name, is_mandatory);
+                    extract_type_from_option(&f.ty).unwrap_or(&f.ty)
+                };
+                infos.insert(f_name.clone(), FieldInfo { is_mandatory, type_: f_type.clone() });
             }
-            _ => ()
+            _ => unreachable!(),
         };
     };
 
-    (fields_kind, fields_type)
+    infos
 }
 
-fn gen_builder_struct_code(derive_input: &DeriveInput) -> TokenStream2 {
-    let name = &derive_input.ident;
-
-    let fields = match &derive_input.data {
-        Data::Struct(ref s) => s.fields.iter().collect::<Vec<_>>(),
-        _ => panic!("can be derived only for structs"),
-    };
-
-    let struct_fields: Vec<_> = fields.iter().map(|field| {
+fn gen_builder_struct_code(structure_name: &Ident, fields: &FieldsNamed) -> TokenStream2 {
+    let struct_fields = fields.named.iter().map(|field| {
         quote::quote! {
             #field
         }
-    }).collect();
+    });
 
-    let name = format!("{}Builder", name);
-    let struct_name = format_ident!("{}", name);
+    let name = format_ident!("{}Builder", structure_name);
 
     let generated_code = quote::quote! {
 
     #[derive(Debug, Default)]
-    struct #struct_name {
+    struct #name {
             #(#struct_fields),*
       }
     };
@@ -88,30 +83,19 @@ fn gen_builder_struct_code(derive_input: &DeriveInput) -> TokenStream2 {
     generated_code
 }
 
-fn gen_impl_builder_code(fields_req: &HashMap<String, bool>, fields_tip: &HashMap<String, Type>) -> TokenStream2 {
-    let struct_fields_setters: Vec<_> = fields_req.iter().map(|(field_name, is_mandatory)| {
-        match is_mandatory {
-            true => {
-                let field_ident = format_ident!("{}", field_name);
-                let field_type = &fields_tip[field_name];
+fn gen_impl_builder_code(fields: &HashMap<Ident, FieldInfo>) -> TokenStream2 {
+    let struct_fields_setters: Vec<_> = fields.iter().map(|(name, info)| {
+        let field_value = match info.is_mandatory {
+            true => quote::quote! { val },
+            false => quote::quote! { Some(val) }
+        };
+        let field_ident = &name;
+        let field_type = &info.type_;
 
-                quote::quote! {
-                fn #field_ident(&mut self, val: #field_type) -> &mut Self {
-                    self.#field_ident = val;
-                    self
-                }
-            }
-            }
-            false => {
-                let field_ident = format_ident!("{}", field_name);
-                let field_type = &fields_tip[field_name];
-
-                quote::quote! {
-                fn #field_ident(&mut self, val: #field_type) -> &mut Self {
-                    self.#field_ident = Some(val);
-                    self
-                }
-            }
+        quote::quote! {
+            fn #field_ident(&mut self, val: #field_type) -> &mut Self {
+                self.#field_ident = #field_value;
+                self
             }
         }
     }).collect();
@@ -140,14 +124,15 @@ fn gen_impl_builder_code(fields_req: &HashMap<String, bool>, fields_tip: &HashMa
 pub fn derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 
+    let input_fields = extract_fields(&input);
     // данные Опциональности и Типов полей
-    let (fields_kind, field_type) = get_fields_info(&input);
+    let fields = get_fields_info(&input_fields);
 
     // генерация билд-структуры по прототипу(теже поля и типы полей) вызывающей структуры
-    let builder_struct_code = gen_builder_struct_code(&input);
+    let builder_struct_code = gen_builder_struct_code(&input.ident, &input_fields);
 
     // Генерация кода функций-сеттеров в зависимости от опциональности полей
-    let impl_command_builder_code = gen_impl_builder_code(&fields_kind, &field_type);
+    let impl_command_builder_code = gen_impl_builder_code(&fields);
 
     let expanded = quote::quote! {
 
