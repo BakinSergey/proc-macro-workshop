@@ -45,16 +45,15 @@ fn get_fields_info(input: &DeriveInput) -> (HashMap<Ident, bool>, HashMap<Ident,
                 let f_name = f.ident.clone().expect("Named field expected");
 
                 //тип поля
-                if is_mandatory {
-                    fields_type.insert(f_name.clone(), f.ty.clone());
+                let f_type = if is_mandatory {
+                    &f.ty
                 } else {
-                    let t = extract_type_from_option(&f.ty).unwrap_or(&f.ty);
-                    fields_type.insert(f_name.clone(), t.clone());
-                }
-
+                    extract_type_from_option(&f.ty).unwrap_or(&f.ty)
+                };
+                fields_type.insert(f_name.clone(), f_type.clone());
                 fields_kind.insert(f_name, is_mandatory);
             }
-            _ => ()
+            _ => unreachable!(),
         };
     };
 
