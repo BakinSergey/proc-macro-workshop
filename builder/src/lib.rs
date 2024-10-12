@@ -64,11 +64,11 @@ fn get_fields_info(fields: &FieldsNamed) -> HashMap<Ident, FieldInfo> {
 }
 
 fn gen_builder_struct_code(structure_name: &Ident, fields: &FieldsNamed) -> TokenStream2 {
-    let struct_fields: Vec<_> = fields.named.iter().map(|field| {
+    let struct_fields = fields.named.iter().map(|field| {
         quote::quote! {
             #field
         }
-    }).collect();
+    });
 
     let name = format_ident!("{}Builder", structure_name);
 
@@ -85,28 +85,17 @@ fn gen_builder_struct_code(structure_name: &Ident, fields: &FieldsNamed) -> Toke
 
 fn gen_impl_builder_code(fields: &HashMap<Ident, FieldInfo>) -> TokenStream2 {
     let struct_fields_setters: Vec<_> = fields.iter().map(|(name, info)| {
-        match info.is_mandatory {
-            true => {
-                let field_ident = &name;
-                let field_type = &info.type_;
+        let field_value = match info.is_mandatory {
+            true => quote::quote! { val },
+            false => quote::quote! { Some(val) }
+        };
+        let field_ident = &name;
+        let field_type = &info.type_;
 
-                quote::quote! {
-                fn #field_ident(&mut self, val: #field_type) -> &mut Self {
-                    self.#field_ident = val;
-                    self
-                }
-            }
-            }
-            false => {
-                let field_ident = &name;
-                let field_type = &info.type_;
-
-                quote::quote! {
-                fn #field_ident(&mut self, val: #field_type) -> &mut Self {
-                    self.#field_ident = Some(val);
-                    self
-                }
-            }
+        quote::quote! {
+            fn #field_ident(&mut self, val: #field_type) -> &mut Self {
+                self.#field_ident = #field_value;
+                self
             }
         }
     }).collect();
