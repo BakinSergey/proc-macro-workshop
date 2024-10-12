@@ -13,19 +13,19 @@ use syn::{parse_macro_input, Data, DeriveInput};
 
 fn get_fields_info(input: &DeriveInput) -> (HashMap<String, bool>, HashMap<String, Type>) {
     let data = match &input.data {
-        Data::Struct(x) => Some(x),
+        Data::Struct(x) => x,
         _ => panic!("only non-empty struct type can be derived for"),
     };
 
-    let fields = match &data.unwrap().fields {
-        Fields::Named(x) => Some(x),
+    let fields = match &data.fields {
+        Fields::Named(x) => x,
         _ => panic!("can't use Unnamed or Unit fields for struct."),
     };
 
     let mut fields_kind = HashMap::new();
     let mut fields_type = HashMap::new();
 
-    for f in fields.unwrap().named.iter() {
+    for f in fields.named.iter() {
         match &f.ty {
             Type::Path(
                 TypePath {
