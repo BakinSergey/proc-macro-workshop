@@ -10,24 +10,24 @@ use quote::format_ident;
 use std::collections::HashMap;
 use syn::Ident;
 use syn::{parse_macro_input, Data, DeriveInput};
+use syn::FieldsNamed;
 
 struct FieldInfo {
     is_mandatory: bool,
     type_: Type,
 }
 
+fn extract_fields(input: &DeriveInput) -> &FieldsNamed {
+    match &input.data {
+        Data::Struct(ref s) => match &s.fields {
+            Fields::Named(ref fields) => fields,
+            _ => panic!("can be derived only for structs with named fields"),
+        },
+        _ => panic!("can be derived only for structs"),
+    }
+}
 
-fn get_fields_info(input: &DeriveInput) -> HashMap<Ident, FieldInfo> {
-    let data = match &input.data {
-        Data::Struct(x) => x,
-        _ => panic!("only non-empty struct type can be derived for"),
-    };
-
-    let fields = match &data.fields {
-        Fields::Named(x) => x,
-        _ => panic!("can't use Unnamed or Unit fields for struct."),
-    };
-
+fn get_fields_info(fields: &FieldsNamed) -> HashMap<Ident, FieldInfo> {
     let mut infos = HashMap::new();
 
     for f in fields.named.iter() {
@@ -63,27 +63,19 @@ fn get_fields_info(input: &DeriveInput) -> HashMap<Ident, FieldInfo> {
     infos
 }
 
-fn gen_builder_struct_code(derive_input: &DeriveInput) -> TokenStream2 {
-    let name = &derive_input.ident;
-
-    let fields = match &derive_input.data {
-        Data::Struct(ref s) => s.fields.iter().collect::<Vec<_>>(),
-        _ => panic!("can be derived only for structs"),
-    };
-
-    let struct_fields: Vec<_> = fields.iter().map(|field| {
+fn gen_builder_struct_code(structure_name: &Ident, fields: &FieldsNamed) -> TokenStream2 {
+    let struct_fields: Vec<_> = fields.named.iter().map(|field| {
         quote::quote! {
             #field
         }
     }).collect();
 
-    let name = format!("{}Builder", name);
-    let struct_name = format_ident!("{}", name);
+    let name = format_ident!("{}Builder", structure_name);
 
     let generated_code = quote::quote! {
 
     #[derive(Debug, Default)]
-    struct #struct_name {
+    struct #name {
             #(#struct_fields),*
       }
     };
@@ -143,11 +135,12 @@ fn gen_impl_builder_code(fields: &HashMap<Ident, FieldInfo>) -> TokenStream2 {
 pub fn derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 
+    let input_fields = extract_fields(&input);
     // данные Опциональности и Типов полей
-    let fields = get_fields_info(&input);
+    let fields = get_fields_info(&input_fields);
 
     // генерация билд-структуры по прототипу(теже поля и типы полей) вызывающей структуры
-    let builder_struct_code = gen_builder_struct_code(&input);
+    let builder_struct_code = gen_builder_struct_code(&input.ident, &input_fields);
 
     // Генерация кода функций-сеттеров в зависимости от опциональности полей
     let impl_command_builder_code = gen_impl_builder_code(&fields);
