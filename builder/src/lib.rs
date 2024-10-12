@@ -8,10 +8,11 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::format_ident;
 use std::collections::HashMap;
+use syn::Ident;
 use syn::{parse_macro_input, Data, DeriveInput};
 
 
-fn get_fields_info(input: &DeriveInput) -> (HashMap<String, bool>, HashMap<String, Type>) {
+fn get_fields_info(input: &DeriveInput) -> (HashMap<Ident, bool>, HashMap<Ident, Type>) {
     let data = match &input.data {
         Data::Struct(x) => x,
         _ => panic!("only non-empty struct type can be derived for"),
@@ -26,22 +27,22 @@ fn get_fields_info(input: &DeriveInput) -> (HashMap<String, bool>, HashMap<Strin
     let mut fields_type = HashMap::new();
 
     for f in fields.named.iter() {
-        match &f.ty {
+        match f.ty {
             Type::Path(
                 TypePath {
                     qself: None,
                     path: Path {
                         leading_colon: None,
                         // Punctuated<PathSegment, Colon2>
-                        segments,
+                        ref segments,
                     },
                 }
             ) => {
                 // Обязательность поля
-                let is_mandatory = segments[0].ident.clone().to_string() != "Option";
+                let is_mandatory = segments[0].ident != "Option";
 
                 // имя поля
-                let f_name = f.ident.clone().unwrap().to_string();
+                let f_name = f.ident.clone().expect("Named field expected");
 
                 //тип поля
                 if is_mandatory {
@@ -88,7 +89,7 @@ fn gen_builder_struct_code(derive_input: &DeriveInput) -> TokenStream2 {
     generated_code
 }
 
-fn gen_impl_builder_code(fields_req: &HashMap<String, bool>, fields_tip: &HashMap<String, Type>) -> TokenStream2 {
+fn gen_impl_builder_code(fields_req: &HashMap<Ident, bool>, fields_tip: &HashMap<Ident, Type>) -> TokenStream2 {
     let struct_fields_setters: Vec<_> = fields_req.iter().map(|(field_name, is_mandatory)| {
         match is_mandatory {
             true => {
