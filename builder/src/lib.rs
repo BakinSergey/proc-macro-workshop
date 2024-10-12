@@ -11,8 +11,13 @@ use std::collections::HashMap;
 use syn::Ident;
 use syn::{parse_macro_input, Data, DeriveInput};
 
+struct FieldInfo {
+    is_mandatory: bool,
+    type_: Type,
+}
 
-fn get_fields_info(input: &DeriveInput) -> (HashMap<Ident, bool>, HashMap<Ident, Type>) {
+
+fn get_fields_info(input: &DeriveInput) -> HashMap<Ident, FieldInfo> {
     let data = match &input.data {
         Data::Struct(x) => x,
         _ => panic!("only non-empty struct type can be derived for"),
@@ -23,8 +28,7 @@ fn get_fields_info(input: &DeriveInput) -> (HashMap<Ident, bool>, HashMap<Ident,
         _ => panic!("can't use Unnamed or Unit fields for struct."),
     };
 
-    let mut fields_kind = HashMap::new();
-    let mut fields_type = HashMap::new();
+    let mut infos = HashMap::new();
 
     for f in fields.named.iter() {
         match f.ty {
@@ -50,14 +54,13 @@ fn get_fields_info(input: &DeriveInput) -> (HashMap<Ident, bool>, HashMap<Ident,
                 } else {
                     extract_type_from_option(&f.ty).unwrap_or(&f.ty)
                 };
-                fields_type.insert(f_name.clone(), f_type.clone());
-                fields_kind.insert(f_name, is_mandatory);
+                infos.insert(f_name.clone(), FieldInfo { is_mandatory, type_: f_type.clone() });
             }
             _ => unreachable!(),
         };
     };
 
-    (fields_kind, fields_type)
+    infos
 }
 
 fn gen_builder_struct_code(derive_input: &DeriveInput) -> TokenStream2 {
@@ -88,12 +91,12 @@ fn gen_builder_struct_code(derive_input: &DeriveInput) -> TokenStream2 {
     generated_code
 }
 
-fn gen_impl_builder_code(fields_req: &HashMap<Ident, bool>, fields_tip: &HashMap<Ident, Type>) -> TokenStream2 {
-    let struct_fields_setters: Vec<_> = fields_req.iter().map(|(field_name, is_mandatory)| {
-        match is_mandatory {
+fn gen_impl_builder_code(fields: &HashMap<Ident, FieldInfo>) -> TokenStream2 {
+    let struct_fields_setters: Vec<_> = fields.iter().map(|(name, info)| {
+        match info.is_mandatory {
             true => {
-                let field_ident = format_ident!("{}", field_name);
-                let field_type = &fields_tip[field_name];
+                let field_ident = &name;
+                let field_type = &info.type_;
 
                 quote::quote! {
                 fn #field_ident(&mut self, val: #field_type) -> &mut Self {
@@ -103,8 +106,8 @@ fn gen_impl_builder_code(fields_req: &HashMap<Ident, bool>, fields_tip: &HashMap
             }
             }
             false => {
-                let field_ident = format_ident!("{}", field_name);
-                let field_type = &fields_tip[field_name];
+                let field_ident = &name;
+                let field_type = &info.type_;
 
                 quote::quote! {
                 fn #field_ident(&mut self, val: #field_type) -> &mut Self {
@@ -141,13 +144,13 @@ pub fn derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 
     // данные Опциональности и Типов полей
-    let (fields_kind, field_type) = get_fields_info(&input);
+    let fields = get_fields_info(&input);
 
     // генерация билд-структуры по прототипу(теже поля и типы полей) вызывающей структуры
     let builder_struct_code = gen_builder_struct_code(&input);
 
     // Генерация кода функций-сеттеров в зависимости от опциональности полей
-    let impl_command_builder_code = gen_impl_builder_code(&fields_kind, &field_type);
+    let impl_command_builder_code = gen_impl_builder_code(&fields);
 
     let expanded = quote::quote! {
 
